@@ -1,0 +1,129 @@
+---
+title: "Affiliation_FRD"
+author: "Melissa Vanderheyden"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+```
+
+## REORGANISE: Instantaneous
+First, we want to calculate how much time each individual has been observed. We'll need this to later standardise the dyadic values by dividing them by the total observation times. The code below makes use of the fact that for each focal protocol, there is one line with an instantaneous observation per minute. For each protocol, we'll calculate how much time (h) the focal individual was observed. Next, we'll make a new dataframe that shows the total observation time per individual. 
+
+
+```{r}
+library (tidyverse)
+library(readxl)
+library(lubridate)
+library(here)
+
+# Load the instantaneous data
+excel_file_path <- here("data", "instantaneous_20240827.xlsx")
+instantaneous <- read_excel(excel_file_path, sheet = "MV")
+view(instantaneous)
+
+#1# Create a data frame with for each focal obs inst the following columns:
+# date, observer, total amount of time observed per protocol. 
+
+# Add a column that shows the total observed time for each protocol (h). 
+# Time is here the minute of the protocol (from 0 to 15). You can use any column since the 
+# length is the same, but Time is the most intuitive.
+instantaneous <- instantaneous %>%
+  group_by(date,prot_nr) %>%
+  mutate(obs_time = ((length(Time)-1)*(1/60))) %>% 
+  ungroup()
+
+# Per protocol, we only need one line to show the total time observed
+uniq_instantaneous <- instantaneous %>%
+  group_by(date, prot_nr) %>%   # Group by Date and Protocol
+  slice_head(n = 1) %>%          # Retain only the first row of each group
+  ungroup()
+
+#2# Create a data frame with all focal IDs and their total observed time
+focal_time <- uniq_instantaneous %>%
+  group_by(focal) %>%
+  summarise(total_obs_time = sum(obs_time))
+
+print(focal_time)
+```
+
+## REORGANISE: Continuous
+
+Since we'll be using the date and focal time stamp, we need to make sure that the values in there make sense first. This has to happen in Excel. 
+1) For the DATE, make a new column named 'date2', with dates according to the format YYYY-MM-DD.
+2) For the TIME, make sure that the time since the start of the focal is labelled Time2. Create a new column with the values from Time2, but copied as numerical values. Name this column Time2_num.
+
+```{r}
+# Import data
+excel_file_path <- here("data", "continuous_20240827.xlsx")
+continuous <- read_excel(excel_file_path, sheet = "MV")
+view(continuous)
+
+# date2: times of format YYYY-MM-DD. 'Convert' this to this format again in R (using lubridate)
+# to be 100% sure the date format is correct. Remove the original 'date' column
+# and store the correct format of date2 in a new column named 'date'. 
+# Remove 'date2'. 
+
+data <- continuous %>%
+  select(-date) %>%
+  mutate(date = ymd(date2)) %>% 
+  select(-date2)
+view(data)
+
+# Sort data frame chronologically
+# Time num is the protocol start, converted to a number. Time2 is the time since
+# the beginning of the focal (so normally between 0:00 and 15:00 min)
+
+data <- data %>%
+  arrange(date, time_num, Time2_num)
+```
+
+Filter out the interactions you need. To start, we will do this for ap-le, but the same protocol can be followed for sb-eb, sg-eg and sp-ep.
+```{r}
+cont_filtered <- data %>% 
+  filter(Action %in% c("ap", "le"))
+```
+Create a unique code for each dyad existing of both short names, in alphabetical order and separated by a ".". 
+```{r}
+cont_filtered <- cont_filtered %>%
+  mutate(dyad_alph = paste(pmin(Actor, Receiver), pmax(Actor,Receiver), sep="."))
+```
+Then, create a unique number for each ap-le pair within the same dyad. First, generate a unique identifier for each day and protocol. Order the dataset based on date, protocol, dyad name, action (ap and le) and time of the focal protocol (Time2_num), to ensure that the data are in the proper order and that 'le' always comes after 'ap'. Create a new column named 'pairing_num' where the values from a newly created 'pairing_counter' vector will be stored. This vector is initially set to one, and will be used to assign a unique number to each pair of ap-le.  
+
+Once everything is set up for it, we can loop over the database to check for rows with 'ap' that are unpaired (pairing_num = NA). 'le_index' is a vector of row indices that correspond to rows where the conditions specified in the which() function are met (i.e., rows with the "le" action that match the dyad_alph and identifier of the current "ap" action and have not been paired yet). The value of the pairing_counter will go into the pairing_num column for the row that corresponds to the first le_index (aka le_index[1]). After doing this, the pairing counter is increased with 1.
+```{r}
+df <- cont_filtered #Change name data frame
+# Create a unique identifier for each day and protocol
+df$identifier <- paste(df$date, df$prot_nr, sep = "_")
+# Order by date, protocol, dyad, and action (to ensure 'ap' comes before 'le')
+df <- df[order(df$date, df$prot_nr, df$dyad_alph, df$Action, df$Time2_num), ]
+
+# Create a unique pairing number
+df$pairing_num <- NA
+pairing_counter <- 1
+
+# Iterate over the dataframe to assign pairing numbers
+for (i in seq_len(nrow(df))) {
+  if (df$Action[i] == "ap" && is.na(df$pairing_num[i])) {
+    # Find the next 'le' for the same dyad and identifier. 
+    le_index <- which(df$dyad_alph == df$dyad_alph[i] & df$Action == "le" 
+                      & is.na(df$pairing_num) & df$identifier == df$identifier[i])
+    if (length(le_index) > 0) {
+      df$pairing_num[i] <- pairing_counter
+      df$pairing_num[le_index[1]] <- pairing_counter
+      pairing_counter <- pairing_counter + 1
+    }
+  }
+}
+
+# Identify unmatched approaches or leaves
+df$pairing_num[is.na(df$pairing_num)] <- "unmatched"
+# Sort again based on date, protocol number and observation timestamp
+df <- df %>% arrange(date, prot_nr, Time2_num)
+
+print(df)
+
+```
+

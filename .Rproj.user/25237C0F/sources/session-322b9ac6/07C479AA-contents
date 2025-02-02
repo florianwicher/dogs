@@ -1,0 +1,88 @@
+library(tidyverse)
+library(readxl)
+library(lubridate)
+library(here)
+library(writexl)
+library(purrr) # For reduce()
+
+# _1.1 IMPORT BIRTH DATA ---------------------------------------------------------------
+birth_data <- read_xlsx(here("data", "litterdyads_cutoffmax_allmothers_norepeats_20250131.xlsx"), sheet = "Sheet1") 
+
+motherdyad <- birth_data %>%
+  filter(pack1 == pack2) %>%
+  pull(motherdyad)
+
+focal_mothers_withinpack <- birth_data %>%
+  filter(pack1 == pack2) %>%
+  mutate(
+    first_litter = pmin(date1, date2),
+    From = first_litter - days(63) - months(3),
+    To = first_litter - days(63),
+    in_focal = ifelse(To > as.Date("2023-06-17"), "yes", "no")
+  )
+
+#write_xlsx(focal_mothers_withinpack, here("output", "litterdyads_cutoffmax_focalpackmates_norepeats_[date].xlsx"))
+
+# _1.2 IMPORT CONTINUOUS DATA ----------------------------------------------------------
+continuous <- read_excel(here("data", "Continuous_20241224.xlsx"), sheet = "ALL") %>%
+  mutate(Date = ymd(Date)) %>%
+  arrange(Date, Time_num, Time_sec) %>%
+  mutate(
+    dyad = paste(pmin(Actor, Receiver), pmax(Actor, Receiver), sep = "."),
+    identifier = paste(Date, Prot_nr, sep = "_")
+  ) %>%
+  filter(dyad %in% motherdyad)
+
+# Import ID Data
+id_all <- bind_rows(
+  birth_data %>% select(id = mother1, pack = pack1),
+  birth_data %>% select(id = mother2, pack = pack2)
+) %>%
+  filter(!is.na(pack)) %>%
+  distinct()
+
+# _2-5 GENERALIZED FUNCTION TO HANDLE INTERACTIONS -------------------------------------
+process_interaction <- function(df, start_action, end_action, cut_off = 0.0333) {
+  df %>%
+    filter(Action %in% c(start_action, end_action)) %>%
+    arrange(Date, Prot_nr, dyad, Action, Time_sec) %>%
+    group_by(dyad, identifier) %>%
+    mutate(
+      pairing_num = cumsum(Action == start_action),
+      protocol_minutes = Time_sec / 60
+    ) %>%
+    spread(Action, protocol_minutes) %>%
+    filter(!is.na(!!sym(end_action))) %>%
+    mutate(time_diff = !!sym(end_action) - !!sym(start_action)) %>%
+    filter(time_diff > cut_off) %>%
+    group_by(dyad) %>%
+    summarize(
+      time_sum = sum(time_diff, na.rm = TRUE),
+      count = n(),
+      .groups = "drop"
+    ) %>%
+    rename_with(~ paste0(start_action, "_", end_action, "_", .), -dyad)
+}
+
+# Process all interaction types using the function
+ap_le_summary <- process_interaction(continuous, "ap", "le")
+sb_eb_summary <- process_interaction(continuous, "sb", "eb")
+sg_eg_summary <- process_interaction(continuous, "sg", "eg")
+sp_ep_summary <- process_interaction(continuous, "sp", "ep")
+
+# _6 FRIENDLY POSTURES ---------------------------------------------------------
+friendly_summary <- continuous %>%
+  filter(Action %in% c("sf", "lf", "ro", "af")) %>%
+  group_by(dyad) %>%
+  summarize(friendly_count = n(), .groups = "drop")
+
+# _7 COMBINE ALL DATA ----------------------------------------------------------
+all_affiliation <- list(ap_le_summary, sb_eb_summary, sg_eg_summary, sp_ep_summary, friendly_summary) %>%
+  reduce(full_join, by = "dyad") %>%
+  mutate(across(-dyad, ~ coalesce(., 0))) %>%
+  separate(dyad, into = c("id1", "id2"), sep = "\\.") %>%
+  left_join(id_all %>% rename(id1 = id, pack1 = pack), by = "id1") %>%
+  left_join(id_all %>% rename(id2 = id, pack2 = pack), by = "id2")
+
+write_xlsx(all_affiliation, here("output", "all_affiliation.xlsx"))
+

@@ -1,0 +1,42 @@
+# 27.08.2024
+# Melissa Vanderheyden
+
+# Clean up affiliation file: INSTANTANEOUS 
+
+library (tidyverse)
+library(readxl)
+library(lubridate)
+library(here)
+
+
+excel_file_path <- here("data", "instantaneous_20241205.xlsx")
+instantaneous <- read_excel(excel_file_path, sheet = "ALL") %>%
+  mutate(Date = ymd(Date))
+view(instantaneous)
+
+#1 Create a data frame with for each focal obs inst the following columns:
+# date, observer, total amount of time observed, based on instantaneous
+
+# Add a column that shows the total observed time (hours) for each protocol
+instantaneous <- instantaneous %>%
+  group_by(Date,Prot_nr) %>%
+  mutate(obs_time = ((length(Focal_minute)-1)*(1/60))) %>%
+  ungroup()
+
+# First maintain only the top row of each series of instantaneous scans
+uniq_instantaneous <- instantaneous %>%
+  group_by(Date, Prot_nr) %>%   # Group by Date and Protocol
+  slice_head(n = 1) %>%          # Retain only the first row of each group
+  ungroup()
+
+view(uniq_instantaneous)
+
+#2 Create a data frame with all focal IDs and their total observed time
+focal_time <- uniq_instantaneous %>%
+  group_by(Focal) %>%
+  summarise(total_obs_time = sum(obs_time))
+
+output_path <- here("output", "focal_time.xlsx")
+write.xlsx(focal_time, file = output_path)
+
+

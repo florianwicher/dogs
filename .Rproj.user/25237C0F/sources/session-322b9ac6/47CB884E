@@ -1,0 +1,29 @@
+{
+    "id": "47CB884E",
+    "path": "~/1_Socioecology_FRD_20250105/FRD DATA/Analysis/Arrrr/Affiliation/scripts/CSI_synchrony_MV.R",
+    "project_path": "scripts/CSI_synchrony_MV.R",
+    "type": "r_source",
+    "hash": "0",
+    "contents": "",
+    "dirty": true,
+    "created": 1738316023600.0,
+    "source_on_save": false,
+    "relative_order": 3,
+    "properties": {
+        "tempName": "Untitled1",
+        "source_window_id": "",
+        "Source": "Source",
+        "cursorPosition": "11,16",
+        "scrollLine": "3",
+        "docOutlineVisible": "1",
+        "docOutlineSize": "252"
+    },
+    "folds": "560|11|564|0|\n",
+    "lastKnownWriteTime": 1738479168,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1738480928910,
+    "read_only": false,
+    "read_only_alternatives": []
+}
